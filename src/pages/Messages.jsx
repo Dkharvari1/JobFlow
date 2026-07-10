@@ -33,6 +33,8 @@ function Messages() {
     const [errorMessage, setErrorMessage] = useState("");
 
     useEffect(() => {
+        if (!workspaceId) return;
+
         loadMessagesPage();
 
         const messagesChannel = supabase
@@ -46,13 +48,38 @@ function Messages() {
                     filter: `workspace_id=eq.${workspaceId}`,
                 },
                 () => {
-                    loadMessagesPage();
+                    loadMessagesPage({ showLoading: false });
                 }
             )
-            .subscribe();
+            .on(
+                "postgres_changes",
+                {
+                    event: "*",
+                    schema: "public",
+                    table: "workspace_message_reads",
+                    filter: `workspace_id=eq.${workspaceId}`,
+                },
+                () => {
+                    loadMessagesPage({ showLoading: false });
+                }
+            )
+            .subscribe((status, error) => {
+                console.log("Messages realtime status:", status);
+
+                if (error) {
+                    console.error("Messages realtime error:", error);
+                }
+            });
+
+        const {
+            data: { subscription },
+        } = supabase.auth.onAuthStateChange(() => {
+            loadMessagesPage({ showLoading: false });
+        });
 
         return () => {
             supabase.removeChannel(messagesChannel);
+            subscription.unsubscribe();
         };
     }, [workspaceId]);
 
@@ -76,8 +103,13 @@ function Messages() {
         }
     }, [selectedTarget, currentMember?.id, messages.length, loading]);
 
-    const loadMessagesPage = async () => {
-        setLoading(true);
+    const loadMessagesPage = async (options = {}) => {
+        const showLoading = options?.showLoading !== false;
+
+        if (showLoading) {
+            setLoading(true);
+        }
+
         setErrorMessage("");
 
         const {
@@ -300,7 +332,13 @@ function Messages() {
 
         return messages
             .filter((message) => {
-                if (message.sender_member_id === currentMember.id) {
+                const sender = getMember(message.sender_member_id);
+
+                const sentByMe =
+                    message.sender_member_id === currentMember.id ||
+                    sender?.user_id === currentUser?.id;
+
+                if (sentByMe) {
                     return false;
                 }
 
@@ -590,13 +628,12 @@ function Messages() {
                         ) : (
                             <div className="space-y-4">
                                 {filteredMessages.map((message) => {
-                                    const sender = getMember(
-                                        message.sender_member_id
-                                    );
+                                    const sender = getMember(message.sender_member_id);
                                     const senderName = getMemberName(sender);
+
                                     const isMine =
-                                        message.sender_member_id ===
-                                        currentMember?.id;
+                                        message.sender_member_id === currentMember?.id ||
+                                        sender?.user_id === currentUser?.id;
                                     const isUnread =
                                         visibleUnreadMessageIds.has(message.id);
 
