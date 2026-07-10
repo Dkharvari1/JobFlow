@@ -27,28 +27,6 @@ const STATUS_DEFAULTS = [
     "Completed",
 ];
 
-const RESOURCE_DEFAULTS = [
-    "WordPress",
-    "Mailchimp",
-    "HubSpot",
-    "Shopify",
-    "Webflow",
-    "Figma",
-    "Canva",
-    "Google Drive",
-];
-
-const TYPE_DEFAULTS = [
-    "Email Blast",
-    "Landing Page",
-    "Website Edit",
-    "Website Build",
-    "Campaign",
-    "Video",
-    "PDF / Flyer",
-    "Social Graphic",
-];
-
 function WorkspaceSettings() {
     const { workspaceId } = useParams();
     const navigate = useNavigate();
@@ -701,13 +679,6 @@ function WorkspaceSettings() {
                                 direction,
                             })
                         }
-                        onSeedDefaults={() =>
-                            seedDefaults({
-                                table: "workspace_job_resources",
-                                defaults: RESOURCE_DEFAULTS,
-                                items: resources,
-                            })
-                        }
                     />
 
                     <CustomizationSection
@@ -745,13 +716,6 @@ function WorkspaceSettings() {
                                 items: jobTypes,
                                 item,
                                 direction,
-                            })
-                        }
-                        onSeedDefaults={() =>
-                            seedDefaults({
-                                table: "workspace_job_types",
-                                defaults: TYPE_DEFAULTS,
-                                items: jobTypes,
                             })
                         }
                     />
@@ -1227,14 +1191,16 @@ function CustomizationSection({
                 </button>
             </div>
 
-            <button
-                type="button"
-                onClick={onSeedDefaults}
-                className="mb-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 px-4 py-3 text-sm font-black text-slate-700 transition hover:bg-slate-50"
-            >
-                <RotateCcw size={17} />
-                Add Starter Options
-            </button>
+            {onSeedDefaults && (
+                <button
+                    type="button"
+                    onClick={onSeedDefaults}
+                    className="mb-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 px-4 py-3 text-sm font-black text-slate-700 transition hover:bg-slate-50"
+                >
+                    <RotateCcw size={17} />
+                    Add Starter Options
+                </button>
+            )}
 
             <div className="space-y-3">
                 {items.length === 0 ? (

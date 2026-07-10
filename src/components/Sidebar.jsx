@@ -221,10 +221,17 @@ function Sidebar() {
                 </nav>
 
                 <div className="border-t border-slate-100 p-4">
+                    <SidebarLink
+                        to="/workspaces"
+                        icon={BriefcaseBusiness}
+                        label="Workspaces"
+                        onClick={closeSidebar}
+                    />
+
                     <button
                         type="button"
                         onClick={handleLogout}
-                        className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-sm font-bold text-slate-600 transition hover:bg-slate-100 hover:text-slate-950"
+                        className="mt-2 flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-sm font-bold text-slate-600 transition hover:bg-slate-100 hover:text-slate-950"
                     >
                         <LogOut size={18} />
                         Log Out

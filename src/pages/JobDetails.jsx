@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
     ArrowLeft,
     ArrowRight,
+    Bell,
     Building2,
     Calendar,
     ClipboardList,
@@ -342,6 +343,15 @@ function JobDetails() {
 
         setComments((prevComments) => [...prevComments, data]);
         setNewComment("");
+
+        setJob((prevJob) => ({
+            ...prevJob,
+            last_activity_at: data.created_at || new Date().toISOString(),
+            last_activity_type: "comment",
+            last_activity_summary: `${memberName} added a comment`,
+            last_activity_by_member_id: currentMember.id,
+            updated_at: new Date().toISOString(),
+        }));
     };
 
     const deleteComment = async (commentId) => {
@@ -477,12 +487,18 @@ function JobDetails() {
             return;
         }
 
+        const activityAt = new Date().toISOString();
+
         const { error } = await supabase
             .from("jobs")
             .update({
                 status_id: selectedStatus.id,
                 status: selectedStatus.name,
-                updated_at: new Date().toISOString(),
+                updated_at: activityAt,
+                last_activity_at: activityAt,
+                last_activity_type: "status",
+                last_activity_summary: `Status changed to ${selectedStatus.name}`,
+                last_activity_by_member_id: currentMember?.id || null,
             })
             .eq("id", id)
             .eq("workspace_id", workspaceId);
@@ -496,7 +512,11 @@ function JobDetails() {
             ...prevJob,
             status_id: selectedStatus.id,
             status: selectedStatus.name,
-            updated_at: new Date().toISOString(),
+            updated_at: activityAt,
+            last_activity_at: activityAt,
+            last_activity_type: "status",
+            last_activity_summary: `Status changed to ${selectedStatus.name}`,
+            last_activity_by_member_id: currentMember?.id || null,
         }));
 
         setFormData((prevData) => ({
@@ -526,6 +546,7 @@ function JobDetails() {
         const selectedMember = members.find(
             (member) => member.id === formData.assigned_member_id
         );
+        const activityAt = new Date().toISOString();
 
         if (!selectedStatus) {
             setSaving(false);
@@ -551,7 +572,11 @@ function JobDetails() {
                 assigned_member_id: formData.assigned_member_id || null,
                 assigned_to: selectedMember ? getMemberName(selectedMember) : null,
                 due_date: formData.due_date || null,
-                updated_at: new Date().toISOString(),
+                updated_at: activityAt,
+                last_activity_at: activityAt,
+                last_activity_type: "edit",
+                last_activity_summary: "Job details updated",
+                last_activity_by_member_id: currentMember?.id || null,
             })
             .eq("id", id)
             .eq("workspace_id", workspaceId)
@@ -733,6 +758,30 @@ function JobDetails() {
             {successMessage && (
                 <div className="mb-5 rounded-2xl border border-green-200 bg-green-50 p-4 text-sm font-bold text-green-700">
                     {successMessage}
+                </div>
+            )}
+
+            {job.last_activity_at && (
+                <div className="mb-5 rounded-3xl border border-blue-200 bg-blue-50 p-5">
+                    <div className="flex items-start gap-3">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white">
+                            <Bell size={20} />
+                        </div>
+
+                        <div>
+                            <p className="text-sm font-black uppercase tracking-wide text-blue-700">
+                                Latest Job Update
+                            </p>
+
+                            <h2 className="mt-1 text-xl font-black text-slate-950">
+                                {getActivityLabel(job)}
+                            </h2>
+
+                            <p className="mt-1 text-sm font-semibold text-blue-700">
+                                {formatDateTime(job.last_activity_at)}
+                            </p>
+                        </div>
+                    </div>
                 </div>
             )}
 
@@ -1177,6 +1226,16 @@ function JobDetails() {
                                             label="Last Updated"
                                             value={formatDateTime(job.updated_at)}
                                         />
+
+                                        <InfoRow
+                                            icon={Bell}
+                                            label="Latest Update"
+                                            value={
+                                                job.last_activity_at
+                                                    ? `${getActivityLabel(job)} · ${formatDateTime(job.last_activity_at)}`
+                                                    : "No updates yet"
+                                            }
+                                        />
                                     </>
                                 )}
                             </div>
@@ -1447,6 +1506,19 @@ function PriorityBadge({ priority }) {
             {priority || "Medium"}
         </span>
     );
+}
+
+function getActivityLabel(job) {
+    if (job.last_activity_summary) return job.last_activity_summary;
+
+    const typeLabels = {
+        comment: "New comment",
+        handoff: "Job handed off",
+        edit: "Job updated",
+        status: "Status updated",
+    };
+
+    return typeLabels[job.last_activity_type] || "Job updated";
 }
 
 function formatDate(value) {

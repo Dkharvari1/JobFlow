@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
+    Bell,
     ClipboardList,
     LayoutGrid,
     List,
@@ -26,6 +27,7 @@ function Jobs({
     const [statuses, setStatuses] = useState([]);
     const [resources, setResources] = useState([]);
     const [jobTypes, setJobTypes] = useState([]);
+    const [currentMember, setCurrentMember] = useState(null);
 
     const [searchTerm, setSearchTerm] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
@@ -43,6 +45,9 @@ function Jobs({
     const loadJobsPageData = async () => {
         setLoading(true);
         setErrorMessage("");
+        const {
+            data: { user },
+        } = await supabase.auth.getUser();
 
         const [
             jobsResponse,
@@ -109,6 +114,10 @@ function Jobs({
 
         const membersData = membersResponse.data || [];
         const userIds = membersData.map((member) => member.user_id);
+
+        setCurrentMember(
+            user ? membersData.find((member) => member.user_id === user.id) || null : null
+        );
 
         let profilesData = [];
 
@@ -216,12 +225,18 @@ function Jobs({
             return;
         }
 
+        const activityAt = new Date().toISOString();
+
         const { error } = await supabase
             .from("jobs")
             .update({
                 status_id: selectedStatus.id,
                 status: selectedStatus.name,
-                updated_at: new Date().toISOString(),
+                updated_at: activityAt,
+                last_activity_at: activityAt,
+                last_activity_type: "status",
+                last_activity_summary: `Status changed to ${selectedStatus.name}`,
+                last_activity_by_member_id: currentMember?.id || null,
             })
             .eq("id", jobId)
             .eq("workspace_id", workspaceId);
@@ -238,7 +253,11 @@ function Jobs({
                         ...job,
                         status_id: selectedStatus.id,
                         status: selectedStatus.name,
-                        updated_at: new Date().toISOString(),
+                        updated_at: activityAt,
+                        last_activity_at: activityAt,
+                        last_activity_type: "status",
+                        last_activity_summary: `Status changed to ${selectedStatus.name}`,
+                        last_activity_by_member_id: currentMember?.id || null,
                     }
                     : job
             )
@@ -540,19 +559,29 @@ function JobsBoard({
                                         No jobs
                                     </div>
                                 ) : (
-                                    columnJobs.map((job) => (
-                                        <JobCard
-                                            key={job.id}
-                                            job={job}
-                                            statuses={statuses}
-                                            status={getJobStatus(job)}
-                                            assignedName={getAssignedName(job)}
-                                            jobResource={getJobResource(job)}
-                                            jobType={getJobType(job)}
-                                            updateJobStatus={updateJobStatus}
-                                            workspaceId={workspaceId}
-                                        />
-                                    ))
+                                        columnJobs.map((job) => (
+                                            <div
+                                                key={job.id}
+                                                className={
+                                                    job.last_activity_at
+                                                        ? "rounded-3xl ring-2 ring-blue-100"
+                                                        : ""
+                                                }
+                                            >
+                                                <JobUpdateBadge job={job} />
+
+                                                <JobCard
+                                                    job={job}
+                                                    statuses={statuses}
+                                                    status={getJobStatus(job)}
+                                                    assignedName={getAssignedName(job)}
+                                                    jobResource={getJobResource(job)}
+                                                    jobType={getJobType(job)}
+                                                    updateJobStatus={updateJobStatus}
+                                                    workspaceId={workspaceId}
+                                                />
+                                            </div>
+                                        ))
                                 )}
                             </div>
                         </section>
@@ -574,7 +603,6 @@ function JobsBoard({
                         <div className="space-y-4">
                             {unknownStatusJobs.map((job) => (
                                 <JobCard
-                                    key={job.id}
                                     job={job}
                                     statuses={statuses}
                                     status={getJobStatus(job)}
@@ -620,7 +648,8 @@ function JobsList({
                     return (
                         <div
                             key={job.id}
-                            className="grid gap-4 px-5 py-4 transition hover:bg-slate-50 md:grid-cols-[1.4fr_1fr_1fr_1fr_1fr] md:items-center"
+                            className={`grid gap-4 px-5 py-4 transition hover:bg-slate-50 md:grid-cols-[1.4fr_1fr_1fr_1fr_1fr] md:items-center ${job.last_activity_at ? "bg-blue-50/40" : ""
+                                }`}
                         >
                             <div>
                                 <Link
@@ -633,6 +662,7 @@ function JobsList({
                                 <p className="mt-1 text-sm text-slate-500">
                                     {getJobType(job)} · {getJobResource(job)}
                                 </p>
+                                <JobUpdateBadge job={job} compact />
                             </div>
 
                             <p className="text-sm font-semibold text-slate-700">
@@ -707,6 +737,64 @@ function StatCard({ label, value }) {
             <p className="mt-2 text-3xl font-black text-slate-950">{value}</p>
         </div>
     );
+}
+
+function JobUpdateBadge({ job, compact = false }) {
+    if (!job.last_activity_at) return null;
+
+    const label = getActivityLabel(job);
+
+    if (compact) {
+        return (
+            <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-1 text-xs font-black text-blue-700">
+                <Bell size={12} />
+                {label} · {formatActivityTime(job.last_activity_at)}
+            </div>
+        );
+    }
+
+    return (
+        <div className="mb-2 flex items-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700">
+            <Bell size={13} />
+            <span>{label}</span>
+            <span className="text-blue-400">·</span>
+            <span>{formatActivityTime(job.last_activity_at)}</span>
+        </div>
+    );
+}
+
+function getActivityLabel(job) {
+    if (job.last_activity_summary) return job.last_activity_summary;
+
+    const typeLabels = {
+        comment: "New comment",
+        handoff: "Job handed off",
+        edit: "Job updated",
+        status: "Status updated",
+    };
+
+    return typeLabels[job.last_activity_type] || "Job updated";
+}
+
+function formatActivityTime(value) {
+    if (!value) return "";
+
+    const date = new Date(value);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMinutes = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMinutes / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffMinutes < 1) return "just now";
+    if (diffMinutes < 60) return `${diffMinutes}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+
+    return date.toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+    });
 }
 
 function formatDate(value) {
