@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, Lock, Mail, UserRound } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 
 function Register() {
+    const navigate = useNavigate();
     const [formData, setFormData] = useState({
         fullName: "",
         email: "",
@@ -46,15 +47,7 @@ function Register() {
             return;
         }
 
-        setSuccessMessage(
-            "Account created. Check your email to confirm your account, then log in."
-        );
-
-        setFormData({
-            fullName: "",
-            email: "",
-            password: "",
-        });
+        navigate("/workspaces");
     };
 
     return (
