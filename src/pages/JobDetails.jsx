@@ -11,6 +11,7 @@ import {
     History,
     Layers,
     MessageSquare,
+    RefreshCcw,
     Save,
     Send,
     Trash2,
@@ -694,6 +695,15 @@ function JobDetails() {
                 </Link>
 
                 <div className="flex flex-wrap gap-3">
+                    <button
+                        type="button"
+                        onClick={loadJobDetails}
+                        className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700 transition hover:bg-slate-50"
+                    >
+                        <RefreshCcw size={17} />
+                        Refresh
+                    </button>
+
                     {canPassJob && (
                         <button
                             type="button"
