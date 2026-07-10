@@ -40,6 +40,50 @@ function Jobs({
 
     useEffect(() => {
         loadJobsPageData();
+
+        const jobsChannel = supabase
+            .channel(`jobs-page-${workspaceId}`)
+            .on(
+                "postgres_changes",
+                {
+                    event: "*",
+                    schema: "public",
+                    table: "jobs",
+                    filter: `workspace_id=eq.${workspaceId}`,
+                },
+                () => {
+                    loadJobsPageData();
+                }
+            )
+            .on(
+                "postgres_changes",
+                {
+                    event: "*",
+                    schema: "public",
+                    table: "job_comments",
+                    filter: `workspace_id=eq.${workspaceId}`,
+                },
+                () => {
+                    loadJobsPageData();
+                }
+            )
+            .on(
+                "postgres_changes",
+                {
+                    event: "*",
+                    schema: "public",
+                    table: "job_handoffs",
+                    filter: `workspace_id=eq.${workspaceId}`,
+                },
+                () => {
+                    loadJobsPageData();
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(jobsChannel);
+        };
     }, [workspaceId]);
 
     const loadJobsPageData = async () => {

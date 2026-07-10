@@ -34,6 +34,26 @@ function Messages() {
 
     useEffect(() => {
         loadMessagesPage();
+
+        const messagesChannel = supabase
+            .channel(`messages-page-${workspaceId}`)
+            .on(
+                "postgres_changes",
+                {
+                    event: "*",
+                    schema: "public",
+                    table: "workspace_messages",
+                    filter: `workspace_id=eq.${workspaceId}`,
+                },
+                () => {
+                    loadMessagesPage();
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(messagesChannel);
+        };
     }, [workspaceId]);
 
     useEffect(() => {

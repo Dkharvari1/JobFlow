@@ -71,6 +71,50 @@ function JobDetails() {
 
     useEffect(() => {
         loadJobDetails();
+
+        const jobDetailsChannel = supabase
+            .channel(`job-details-${id}`)
+            .on(
+                "postgres_changes",
+                {
+                    event: "*",
+                    schema: "public",
+                    table: "jobs",
+                    filter: `id=eq.${id}`,
+                },
+                () => {
+                    loadJobDetails();
+                }
+            )
+            .on(
+                "postgres_changes",
+                {
+                    event: "*",
+                    schema: "public",
+                    table: "job_comments",
+                    filter: `job_id=eq.${id}`,
+                },
+                () => {
+                    loadJobDetails();
+                }
+            )
+            .on(
+                "postgres_changes",
+                {
+                    event: "*",
+                    schema: "public",
+                    table: "job_handoffs",
+                    filter: `job_id=eq.${id}`,
+                },
+                () => {
+                    loadJobDetails();
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(jobDetailsChannel);
+        };
     }, [workspaceId, id]);
 
     const loadJobDetails = async () => {
