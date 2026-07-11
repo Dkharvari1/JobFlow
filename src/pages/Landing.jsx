@@ -52,6 +52,17 @@ function Landing() {
         return () => observer.disconnect();
     }, []);
 
+    const scrollToSection = (sectionId) => {
+        const section = document.getElementById(sectionId);
+
+        if (section) {
+            section.scrollIntoView({
+                behavior: "smooth",
+                block: "start",
+            });
+        }
+    };
+
     return (
         <div ref={landingRef} id="top" className="min-h-screen bg-slate-950 text-white">
             <header ref={headerRef} className="border-b border-white/10">
@@ -68,15 +79,29 @@ function Landing() {
                     </Link>
 
                     <nav className="hidden items-center gap-8 text-sm text-slate-300 md:flex">
-                        <a href="#features" className="hover:text-white">
+                        <button
+                            type="button"
+                            onClick={() => scrollToSection("features")}
+                            className="transition hover:text-white"
+                        >
                             Features
-                        </a>
-                        <a href="#workflow" className="hover:text-white">
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => scrollToSection("workflow")}
+                            className="transition hover:text-white"
+                        >
                             Workflow
-                        </a>
-                        <a href="#how-to-use" className="hover:text-white">
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => scrollToSection("how-to-use")}
+                            className="transition hover:text-white"
+                        >
                             How It Works
-                        </a>
+                        </button>
                     </nav>
 
                     <div className="flex items-center gap-3">
