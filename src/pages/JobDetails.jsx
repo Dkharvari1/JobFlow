@@ -44,7 +44,6 @@ function JobDetails() {
 
     const [jobLinks, setJobLinks] = useState([]);
     const [newLink, setNewLink] = useState({
-        title: "",
         url: "",
         notes: "",
     });
@@ -566,14 +565,33 @@ function JobDetails() {
         setErrorMessage("");
         setSuccessMessage("");
 
+        let previewData = null;
+
+        const { data: preview, error: previewError } =
+            await supabase.functions.invoke("link-preview", {
+                body: {
+                    url: cleanUrl,
+                },
+            });
+
+        if (!previewError && preview) {
+            previewData = preview;
+        } else {
+            previewData = getFallbackLinkPreview(cleanUrl);
+        }
+
         const { data, error } = await supabase
             .from("job_links")
             .insert({
                 workspace_id: workspaceId,
                 job_id: id,
                 added_by_member_id: currentMember.id,
-                title: newLink.title.trim() || null,
-                url: cleanUrl,
+                title: previewData.title || null,
+                description: previewData.description || null,
+                image_url: previewData.image_url || null,
+                site_name: previewData.site_name || null,
+                favicon_url: previewData.favicon_url || null,
+                url: previewData.url || cleanUrl,
                 notes: newLink.notes.trim() || null,
             })
             .select()
@@ -586,9 +604,32 @@ function JobDetails() {
             return;
         }
 
+        const activityAt = new Date().toISOString();
+
+        await supabase
+            .from("jobs")
+            .update({
+                updated_at: activityAt,
+                last_activity_at: activityAt,
+                last_activity_type: "link",
+                last_activity_summary: "Work link added",
+                last_activity_by_member_id: currentMember.id,
+            })
+            .eq("id", id)
+            .eq("workspace_id", workspaceId);
+
         setJobLinks((prevLinks) => [data, ...prevLinks]);
+
+        setJob((prevJob) => ({
+            ...prevJob,
+            updated_at: activityAt,
+            last_activity_at: activityAt,
+            last_activity_type: "link",
+            last_activity_summary: "Work link added",
+            last_activity_by_member_id: currentMember.id,
+        }));
+
         setNewLink({
-            title: "",
             url: "",
             notes: "",
         });
@@ -1112,19 +1153,11 @@ function JobDetails() {
                         <div className="mt-8">
                             <SectionTitle
                                 title="Work Links"
-                                text="Add links for files, folders, websites, designs, docs, forms, or anything needed to complete this job."
+                                text="Paste a link and JobFlow will automatically pull the title, description, and preview image when available."
                             />
 
                             <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
                                 <div className="mb-5 grid gap-3">
-                                    <input
-                                        name="title"
-                                        value={newLink.title}
-                                        onChange={handleLinkChange}
-                                        placeholder="Link title, like Google Drive folder, Figma design, client website..."
-                                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-400"
-                                    />
-
                                     <input
                                         name="url"
                                         value={newLink.url}
@@ -1610,34 +1643,61 @@ function JobDetails() {
 }
 
 function RichLinkPreview({ link, canDelete, onDelete }) {
-    const preview = getLinkPreview(link);
+    const preview = getStoredLinkPreview(link);
 
     return (
         <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex flex-col md:flex-row">
-                <a
-                    href={preview.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex min-h-32 items-center justify-center bg-slate-100 p-6 md:w-40"
-                >
-                    {preview.favicon ? (
+            <div className="flex flex-col">
+                {preview.image_url ? (
+                    <a
+                        href={preview.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block max-h-64 overflow-hidden bg-slate-100"
+                    >
                         <img
-                            src={preview.favicon}
+                            src={preview.image_url}
                             alt=""
-                            className="h-14 w-14 rounded-2xl"
+                            className="h-56 w-full object-cover"
+                            onError={(e) => {
+                                e.currentTarget.style.display = "none";
+                            }}
                         />
-                    ) : (
-                        <Globe size={36} className="text-slate-400" />
-                    )}
-                </a>
+                    </a>
+                ) : (
+                    <a
+                        href={preview.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex h-40 items-center justify-center bg-slate-100"
+                    >
+                        {preview.favicon_url ? (
+                            <img
+                                src={preview.favicon_url}
+                                alt=""
+                                className="h-16 w-16 rounded-2xl"
+                            />
+                        ) : (
+                            <Globe size={42} className="text-slate-400" />
+                        )}
+                    </a>
+                )}
 
-                <div className="min-w-0 flex-1 p-5">
+                <div className="p-5">
                     <div className="mb-3 flex items-start justify-between gap-4">
                         <div className="min-w-0">
-                            <p className="mb-1 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-slate-400">
-                                <LinkIcon size={13} />
-                                {preview.domain}
+                            <p className="mb-2 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-slate-400">
+                                {preview.favicon_url ? (
+                                    <img
+                                        src={preview.favicon_url}
+                                        alt=""
+                                        className="h-4 w-4 rounded"
+                                    />
+                                ) : (
+                                    <LinkIcon size={13} />
+                                )}
+
+                                {preview.site_name || preview.domain}
                             </p>
 
                             <a
@@ -1674,10 +1734,19 @@ function RichLinkPreview({ link, canDelete, onDelete }) {
                         </div>
                     </div>
 
-                    {link.notes && (
+                    {preview.description && (
                         <p className="mb-3 line-clamp-3 text-sm leading-6 text-slate-600">
-                            {link.notes}
+                            {preview.description}
                         </p>
+                    )}
+
+                    {link.notes && (
+                        <div className="mb-3 rounded-2xl bg-slate-50 p-3 text-sm leading-6 text-slate-600">
+                            <span className="font-black text-slate-800">
+                                Notes:
+                            </span>{" "}
+                            {link.notes}
+                        </div>
                     )}
 
                     <p className="truncate text-xs font-semibold text-slate-400">
@@ -1701,26 +1770,60 @@ function normalizeUrl(value) {
     return `https://${cleanValue}`;
 }
 
-function getLinkPreview(link) {
+function getStoredLinkPreview(link) {
     const normalizedUrl = normalizeUrl(link.url);
 
     try {
         const url = new URL(normalizedUrl);
         const domain = url.hostname.replace("www.", "");
-        const favicon = `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
 
         return {
             url: normalizedUrl,
             domain,
-            favicon,
             title: link.title || domain,
+            description: link.description || "",
+            image_url: link.image_url || "",
+            site_name: link.site_name || domain,
+            favicon_url:
+                link.favicon_url ||
+                `https://www.google.com/s2/favicons?domain=${domain}&sz=128`,
         };
     } catch {
         return {
             url: normalizedUrl,
             domain: "Link",
-            favicon: "",
             title: link.title || link.url,
+            description: link.description || "",
+            image_url: link.image_url || "",
+            site_name: link.site_name || "Link",
+            favicon_url: link.favicon_url || "",
+        };
+    }
+}
+
+function getFallbackLinkPreview(value) {
+    const normalizedUrl = normalizeUrl(value);
+
+    try {
+        const url = new URL(normalizedUrl);
+        const domain = url.hostname.replace("www.", "");
+
+        return {
+            url: normalizedUrl,
+            title: domain,
+            description: "",
+            image_url: "",
+            site_name: domain,
+            favicon_url: `https://www.google.com/s2/favicons?domain=${domain}&sz=128`,
+        };
+    } catch {
+        return {
+            url: normalizedUrl,
+            title: normalizedUrl,
+            description: "",
+            image_url: "",
+            site_name: "Link",
+            favicon_url: "",
         };
     }
 }
@@ -1874,6 +1977,7 @@ function getActivityLabel(job) {
         handoff: "Job handed off",
         edit: "Job updated",
         status: "Status updated",
+        link: "Work link added",
     };
 
     return typeLabels[job.last_activity_type] || "Job updated";
