@@ -16,6 +16,10 @@ import {
     Send,
     Trash2,
     UserRound,
+    ExternalLink,
+    Globe,
+    LinkIcon,
+    Plus,
     X,
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
@@ -37,6 +41,14 @@ function JobDetails() {
     const [jobTypes, setJobTypes] = useState([]);
     const [handoffs, setHandoffs] = useState([]);
     const [comments, setComments] = useState([]);
+
+    const [jobLinks, setJobLinks] = useState([]);
+    const [newLink, setNewLink] = useState({
+        title: "",
+        url: "",
+        notes: "",
+    });
+    const [addingLink, setAddingLink] = useState(false);
 
     const [newComment, setNewComment] = useState("");
 
@@ -110,6 +122,18 @@ function JobDetails() {
                     loadJobDetails();
                 }
             )
+            .on(
+                "postgres_changes",
+                {
+                    event: "*",
+                    schema: "public",
+                    table: "job_links",
+                    filter: `job_id=eq.${id}`,
+                },
+                () => {
+                    loadJobDetails();
+                }
+            )
             .subscribe();
 
         return () => {
@@ -142,6 +166,7 @@ function JobDetails() {
             jobTypesResponse,
             handoffsResponse,
             commentsResponse,
+            jobLinksResponse,
         ] = await Promise.all([
             supabase
                 .from("jobs")
@@ -181,6 +206,12 @@ function JobDetails() {
                 .eq("workspace_id", workspaceId)
                 .eq("job_id", id)
                 .order("created_at", { ascending: true }),
+            supabase
+                .from("job_links")
+                .select("*")
+                .eq("workspace_id", workspaceId)
+                .eq("job_id", id)
+                .order("created_at", { ascending: false }),
         ]);
 
         if (jobResponse.error) {
@@ -221,6 +252,12 @@ function JobDetails() {
 
         if (commentsResponse.error) {
             setErrorMessage(commentsResponse.error.message);
+            setLoading(false);
+            return;
+        }
+
+        if (jobLinksResponse.error) {
+            setErrorMessage(jobLinksResponse.error.message);
             setLoading(false);
             return;
         }
@@ -278,6 +315,7 @@ function JobDetails() {
         setJobTypes(jobTypesData);
         setHandoffs(handoffsResponse.data || []);
         setComments(commentsResponse.data || []);
+        setJobLinks(jobLinksResponse.data || []);
         setCurrentMember(currentMembership || null);
 
         setFormData({
@@ -508,6 +546,91 @@ function JobDetails() {
         setSuccessMessage("Job passed to the selected team member.");
 
         await loadJobDetails();
+    };
+
+    const handleLinkChange = (e) => {
+        const { name, value } = e.target;
+
+        setNewLink((prevLink) => ({
+            ...prevLink,
+            [name]: value,
+        }));
+    };
+
+    const addJobLink = async () => {
+        const cleanUrl = normalizeUrl(newLink.url);
+
+        if (!cleanUrl || !currentMember) return;
+
+        setAddingLink(true);
+        setErrorMessage("");
+        setSuccessMessage("");
+
+        const { data, error } = await supabase
+            .from("job_links")
+            .insert({
+                workspace_id: workspaceId,
+                job_id: id,
+                added_by_member_id: currentMember.id,
+                title: newLink.title.trim() || null,
+                url: cleanUrl,
+                notes: newLink.notes.trim() || null,
+            })
+            .select()
+            .single();
+
+        setAddingLink(false);
+
+        if (error) {
+            setErrorMessage(error.message);
+            return;
+        }
+
+        setJobLinks((prevLinks) => [data, ...prevLinks]);
+        setNewLink({
+            title: "",
+            url: "",
+            notes: "",
+        });
+
+        setSuccessMessage("Work link added.");
+    };
+
+    const deleteJobLink = async (linkId) => {
+        const confirmed = window.confirm(
+            "Are you sure you want to delete this work link?"
+        );
+
+        if (!confirmed) return;
+
+        setErrorMessage("");
+        setSuccessMessage("");
+
+        const { error } = await supabase
+            .from("job_links")
+            .delete()
+            .eq("id", linkId)
+            .eq("workspace_id", workspaceId)
+            .eq("job_id", id);
+
+        if (error) {
+            setErrorMessage(error.message);
+            return;
+        }
+
+        setJobLinks((prevLinks) =>
+            prevLinks.filter((link) => link.id !== linkId)
+        );
+
+        setSuccessMessage("Work link deleted.");
+    };
+
+    const canDeleteJobLink = (link) => {
+        return (
+            currentMember?.role === "owner" ||
+            currentMember?.role === "admin" ||
+            link.added_by_member_id === currentMember?.id
+        );
     };
 
     const handleChange = (e) => {
@@ -988,6 +1111,71 @@ function JobDetails() {
 
                         <div className="mt-8">
                             <SectionTitle
+                                title="Work Links"
+                                text="Add links for files, folders, websites, designs, docs, forms, or anything needed to complete this job."
+                            />
+
+                            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                                <div className="mb-5 grid gap-3">
+                                    <input
+                                        name="title"
+                                        value={newLink.title}
+                                        onChange={handleLinkChange}
+                                        placeholder="Link title, like Google Drive folder, Figma design, client website..."
+                                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-400"
+                                    />
+
+                                    <input
+                                        name="url"
+                                        value={newLink.url}
+                                        onChange={handleLinkChange}
+                                        placeholder="Paste link here..."
+                                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-400"
+                                    />
+
+                                    <textarea
+                                        name="notes"
+                                        value={newLink.notes}
+                                        onChange={handleLinkChange}
+                                        rows="3"
+                                        placeholder="Optional notes about this link..."
+                                        className="w-full resize-none rounded-2xl border border-slate-200 bg-white p-4 text-sm leading-7 outline-none transition focus:border-slate-400"
+                                    />
+
+                                    <div className="flex justify-end">
+                                        <button
+                                            type="button"
+                                            onClick={addJobLink}
+                                            disabled={addingLink || !newLink.url.trim()}
+                                            className="inline-flex items-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-black text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                            <Plus size={17} />
+                                            {addingLink ? "Adding..." : "Add Link"}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {jobLinks.length === 0 ? (
+                                    <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm font-semibold text-slate-400">
+                                        No work links yet.
+                                    </div>
+                                ) : (
+                                    <div className="grid gap-4">
+                                        {jobLinks.map((link) => (
+                                            <RichLinkPreview
+                                                key={link.id}
+                                                link={link}
+                                                canDelete={canDeleteJobLink(link)}
+                                                onDelete={() => deleteJobLink(link.id)}
+                                            />
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="mt-8">
+                            <SectionTitle
                                 title="Comments"
                                 text="Anyone in this workspace can comment on this job, even if it is not assigned to them."
                             />
@@ -1419,6 +1607,122 @@ function JobDetails() {
             )}
         </div>
     );
+}
+
+function RichLinkPreview({ link, canDelete, onDelete }) {
+    const preview = getLinkPreview(link);
+
+    return (
+        <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex flex-col md:flex-row">
+                <a
+                    href={preview.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex min-h-32 items-center justify-center bg-slate-100 p-6 md:w-40"
+                >
+                    {preview.favicon ? (
+                        <img
+                            src={preview.favicon}
+                            alt=""
+                            className="h-14 w-14 rounded-2xl"
+                        />
+                    ) : (
+                        <Globe size={36} className="text-slate-400" />
+                    )}
+                </a>
+
+                <div className="min-w-0 flex-1 p-5">
+                    <div className="mb-3 flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                            <p className="mb-1 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-slate-400">
+                                <LinkIcon size={13} />
+                                {preview.domain}
+                            </p>
+
+                            <a
+                                href={preview.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="line-clamp-2 text-lg font-black text-slate-950 transition hover:underline"
+                            >
+                                {preview.title}
+                            </a>
+                        </div>
+
+                        <div className="flex shrink-0 items-center gap-2">
+                            <a
+                                href={preview.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-950"
+                                title="Open link"
+                            >
+                                <ExternalLink size={18} />
+                            </a>
+
+                            {canDelete && (
+                                <button
+                                    type="button"
+                                    onClick={onDelete}
+                                    className="rounded-xl p-2 text-red-500 transition hover:bg-red-50"
+                                    title="Delete link"
+                                >
+                                    <Trash2 size={18} />
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    {link.notes && (
+                        <p className="mb-3 line-clamp-3 text-sm leading-6 text-slate-600">
+                            {link.notes}
+                        </p>
+                    )}
+
+                    <p className="truncate text-xs font-semibold text-slate-400">
+                        {preview.url}
+                    </p>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function normalizeUrl(value) {
+    const cleanValue = value.trim();
+
+    if (!cleanValue) return "";
+
+    if (cleanValue.startsWith("http://") || cleanValue.startsWith("https://")) {
+        return cleanValue;
+    }
+
+    return `https://${cleanValue}`;
+}
+
+function getLinkPreview(link) {
+    const normalizedUrl = normalizeUrl(link.url);
+
+    try {
+        const url = new URL(normalizedUrl);
+        const domain = url.hostname.replace("www.", "");
+        const favicon = `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
+
+        return {
+            url: normalizedUrl,
+            domain,
+            favicon,
+            title: link.title || domain,
+        };
+    } catch {
+        return {
+            url: normalizedUrl,
+            domain: "Link",
+            favicon: "",
+            title: link.title || link.url,
+        };
+    }
 }
 
 function findOption(items, id, savedName) {
