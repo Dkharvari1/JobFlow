@@ -8,6 +8,7 @@ import {
     Plus,
     Search,
     SlidersHorizontal,
+    UserRound,
 } from "lucide-react";
 import JobCard from "../components/JobCard";
 import { supabase } from "../lib/supabaseClient";
@@ -31,6 +32,7 @@ function Jobs({
 
     const [searchTerm, setSearchTerm] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
+    const [assignedFilter, setAssignedFilter] = useState("all");
     const [priorityFilter, setPriorityFilter] = useState("All Priorities");
     const [viewMode, setViewMode] = useState(defaultView);
 
@@ -193,6 +195,14 @@ function Jobs({
         return profiles.find((profile) => profile.id === userId);
     };
 
+    const getMemberName = (member) => {
+        if (!member) return "Unassigned";
+
+        const profile = getProfile(member.user_id);
+
+        return profile?.full_name || profile?.email || "Unnamed User";
+    };
+
     const getAssignedName = (job) => {
         if (!job.assigned_member_id) return job.assigned_to || "Unassigned";
 
@@ -334,11 +344,34 @@ function Jobs({
             const matchesStatus =
                 statusFilter === "all" || status.id === statusFilter;
 
+            const selectedAssignedMember = members.find(
+                (member) => member.id === assignedFilter
+            );
+
+            const selectedAssignedName = selectedAssignedMember
+                ? getMemberName(selectedAssignedMember).toLowerCase()
+                : "";
+
+            const matchesAssigned =
+                assignedFilter === "all" ||
+                (assignedFilter === "unassigned" &&
+                    !job.assigned_member_id &&
+                    !job.assigned_to) ||
+                job.assigned_member_id === assignedFilter ||
+                (!job.assigned_member_id &&
+                    selectedAssignedName &&
+                    assignedName === selectedAssignedName);
+
             const matchesPriority =
                 priorityFilter === "All Priorities" ||
                 job.priority === priorityFilter;
 
-            return matchesSearch && matchesStatus && matchesPriority;
+            return (
+                matchesSearch &&
+                matchesStatus &&
+                matchesAssigned &&
+                matchesPriority
+            );
         });
     }, [
         jobs,
@@ -350,6 +383,7 @@ function Jobs({
         statuses,
         resources,
         jobTypes,
+        assignedFilter,
     ]);
 
     const totalJobs = jobs.length;
@@ -429,7 +463,7 @@ function Jobs({
             </div>
 
             <div className="mb-6 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-                <div className="grid gap-4 xl:grid-cols-[1.5fr_1fr_1fr_auto] xl:items-center">
+                <div className="grid gap-4 xl:grid-cols-[1.5fr_1fr_1fr_1fr_auto] xl:items-center">
                     <div className="relative">
                         <Search
                             size={18}
@@ -461,6 +495,28 @@ function Jobs({
                             {statuses.map((status) => (
                                 <option key={status.id} value={status.id}>
                                     {status.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div className="relative">
+                        <UserRound
+                            size={18}
+                            className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
+                        />
+
+                        <select
+                            value={assignedFilter}
+                            onChange={(e) => setAssignedFilter(e.target.value)}
+                            className="w-full appearance-none rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-sm outline-none transition focus:border-slate-400 focus:bg-white"
+                        >
+                            <option value="all">All Assignees</option>
+                            <option value="unassigned">Unassigned</option>
+
+                            {members.map((member) => (
+                                <option key={member.id} value={member.id}>
+                                    {getMemberName(member)}
                                 </option>
                             ))}
                         </select>

@@ -34,6 +34,13 @@ function CreateJob() {
         dueDate: "",
     });
 
+    const [workLink, setWorkLink] = useState({
+        url: "",
+        notes: "",
+    });
+
+    const [generatingJobNumber, setGeneratingJobNumber] = useState(false);
+
     const [loading, setLoading] = useState(false);
     const [loadingPage, setLoadingPage] = useState(true);
     const [errorMessage, setErrorMessage] = useState("");
@@ -163,6 +170,102 @@ function CreateJob() {
         }));
     };
 
+    const handleWorkLinkChange = (e) => {
+        const { name, value } = e.target;
+
+        setWorkLink((prevLink) => ({
+            ...prevLink,
+            [name]: value,
+        }));
+    };
+
+    const generateJobNumber = async () => {
+        setGeneratingJobNumber(true);
+        setErrorMessage("");
+
+        const { data, error } = await supabase
+            .from("jobs")
+            .select("job_number")
+            .eq("workspace_id", workspaceId);
+
+        setGeneratingJobNumber(false);
+
+        if (error) {
+            setErrorMessage(error.message);
+            return;
+        }
+
+        const usedNumbers = new Set(
+            (data || [])
+                .map((job) => String(job.job_number || "").trim())
+                .filter(Boolean)
+        );
+
+        let highestNumber = 1000;
+
+        usedNumbers.forEach((jobNumber) => {
+            const matches = jobNumber.match(/\d+/g);
+
+            if (!matches || matches.length === 0) return;
+
+            const lastNumber = Number(matches[matches.length - 1]);
+
+            if (!Number.isNaN(lastNumber)) {
+                highestNumber = Math.max(highestNumber, lastNumber);
+            }
+        });
+
+        let nextNumber = highestNumber + 1;
+
+        while (usedNumbers.has(String(nextNumber))) {
+            nextNumber += 1;
+        }
+
+        setFormData((prevData) => ({
+            ...prevData,
+            jobNumber: String(nextNumber),
+        }));
+    };
+
+    function normalizeUrl(value) {
+        const cleanValue = value.trim();
+
+        if (!cleanValue) return "";
+
+        if (cleanValue.startsWith("http://") || cleanValue.startsWith("https://")) {
+            return cleanValue;
+        }
+
+        return `https://${cleanValue}`;
+    }
+
+    function getFallbackLinkPreview(value) {
+        const normalizedUrl = normalizeUrl(value);
+
+        try {
+            const url = new URL(normalizedUrl);
+            const domain = url.hostname.replace("www.", "");
+
+            return {
+                url: normalizedUrl,
+                title: domain,
+                description: "",
+                image_url: "",
+                site_name: domain,
+                favicon_url: `https://www.google.com/s2/favicons?domain=${domain}&sz=128`,
+            };
+        } catch {
+            return {
+                url: normalizedUrl,
+                title: normalizedUrl,
+                description: "",
+                image_url: "",
+                site_name: "Link",
+                favicon_url: "",
+            };
+        }
+    }
+
     const handleSubmit = async (e) => {
         e.preventDefault();
 
@@ -177,6 +280,29 @@ function CreateJob() {
         if (userError || !user) {
             setLoading(false);
             setErrorMessage("You must be logged in to create a job.");
+            return;
+        }
+
+        const cleanJobNumber = formData.jobNumber.trim();
+
+        const { data: existingJob, error: existingJobError } = await supabase
+            .from("jobs")
+            .select("id")
+            .eq("workspace_id", workspaceId)
+            .eq("job_number", cleanJobNumber)
+            .maybeSingle();
+
+        if (existingJobError) {
+            setLoading(false);
+            setErrorMessage(existingJobError.message);
+            return;
+        }
+
+        if (existingJob) {
+            setLoading(false);
+            setErrorMessage(
+                "That job number is already being used. Generate a new one or enter a different number."
+            );
             return;
         }
 
@@ -199,34 +325,85 @@ function CreateJob() {
             (member) => member.id === formData.assignedMemberId
         );
 
-        const { error } = await supabase.from("jobs").insert({
-            workspace_id: workspaceId,
-            job_number: formData.jobNumber.trim(),
-            title: formData.title.trim(),
-            client: formData.client.trim(),
-            client_contact: formData.clientContact.trim() || null,
-            description: formData.description.trim(),
-            status_id: selectedStatus.id,
-            status: selectedStatus.name,
-            job_type_id: selectedType?.id || null,
-            type: selectedType?.name || null,
-            job_resource_id: selectedResource?.id || null,
-            job_resource: selectedResource?.name || null,
-            priority: formData.priority,
-            assigned_member_id: formData.assignedMemberId || null,
-            assigned_to: selectedMember ? getMemberName(selectedMember) : null,
-            due_date: formData.dueDate || null,
-            created_by: user.id,
-        });
+        const currentMember = members.find((member) => member.user_id === user.id);
 
-        setLoading(false);
+        if (!currentMember) {
+            setLoading(false);
+            setErrorMessage("You are not a member of this workspace.");
+            return;
+        }
+
+        const { data: createdJob, error } = await supabase
+            .from("jobs")
+            .insert({
+                workspace_id: workspaceId,
+                job_number: cleanJobNumber,
+                title: formData.title.trim(),
+                client: formData.client.trim(),
+                client_contact: formData.clientContact.trim() || null,
+                description: formData.description.trim(),
+                status_id: selectedStatus.id,
+                status: selectedStatus.name,
+                job_type_id: selectedType?.id || null,
+                type: selectedType?.name || null,
+                job_resource_id: selectedResource?.id || null,
+                job_resource: selectedResource?.name || null,
+                priority: formData.priority,
+                assigned_member_id: formData.assignedMemberId || null,
+                assigned_to: selectedMember ? getMemberName(selectedMember) : null,
+                due_date: formData.dueDate || null,
+                created_by: user.id,
+            })
+            .select()
+            .single();
 
         if (error) {
+            setLoading(false);
             setErrorMessage(error.message);
             return;
         }
 
-        navigate(`/workspaces/${workspaceId}/jobs`);
+        const cleanLinkUrl = normalizeUrl(workLink.url);
+
+        if (cleanLinkUrl) {
+            let previewData = getFallbackLinkPreview(cleanLinkUrl);
+
+            const { data: preview, error: previewError } =
+                await supabase.functions.invoke("link-preview", {
+                    body: {
+                        url: cleanLinkUrl,
+                    },
+                });
+
+            if (!previewError && preview && !preview.error) {
+                previewData = preview;
+            }
+
+            const { error: linkError } = await supabase.from("job_links").insert({
+                workspace_id: workspaceId,
+                job_id: createdJob.id,
+                added_by_member_id: currentMember.id,
+                title: previewData.title || null,
+                description: previewData.description || null,
+                image_url: previewData.image_url || null,
+                site_name: previewData.site_name || null,
+                favicon_url: previewData.favicon_url || null,
+                url: previewData.url || cleanLinkUrl,
+                notes: workLink.notes.trim() || null,
+            });
+
+            if (linkError) {
+                setLoading(false);
+                setErrorMessage(
+                    `Job was created, but the work link could not be added: ${linkError.message}`
+                );
+                return;
+            }
+        }
+
+        setLoading(false);
+
+        navigate(`/workspaces/${workspaceId}/jobs/${createdJob.id}`);
     };
 
     if (loadingPage) {
@@ -323,14 +500,35 @@ function CreateJob() {
                 </div>
 
                 <div className="grid gap-5 md:grid-cols-2">
-                    <InputField
-                        label="Job Number"
-                        name="jobNumber"
-                        value={formData.jobNumber}
-                        onChange={handleChange}
-                        placeholder="JOB-001"
-                        required
-                    />
+                    <div>
+                        <label className="mb-2 block text-sm font-bold text-slate-700">
+                            Job Number
+                        </label>
+
+                        <div className="flex gap-2">
+                            <input
+                                name="jobNumber"
+                                value={formData.jobNumber}
+                                onChange={handleChange}
+                                placeholder="1001"
+                                required
+                                className="min-w-0 flex-1 rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-slate-400"
+                            />
+
+                            <button
+                                type="button"
+                                onClick={generateJobNumber}
+                                disabled={generatingJobNumber}
+                                className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                {generatingJobNumber ? "Generating..." : "Generate"}
+                            </button>
+                        </div>
+
+                        <p className="mt-2 text-xs font-semibold text-slate-400">
+                            Generates the next unused number in this workspace.
+                        </p>
+                    </div>
 
                     <InputField
                         label="Job Title"
@@ -455,6 +653,51 @@ function CreateJob() {
                         required
                         className="w-full resize-none rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-slate-400"
                     />
+                </div>
+
+                <div className="mt-8 rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                    <div className="mb-5">
+                        <h2 className="text-xl font-black text-slate-950">
+                            Work Link
+                        </h2>
+
+                        <p className="mt-1 text-sm text-slate-500">
+                            Optional. Paste a link for files, folders, designs, docs, websites,
+                            or anything needed for this job. JobFlow will pull the title,
+                            description, and preview image automatically when available.
+                        </p>
+                    </div>
+
+                    <div className="grid gap-4">
+                        <div>
+                            <label className="mb-2 block text-sm font-bold text-slate-700">
+                                Link
+                            </label>
+
+                            <input
+                                name="url"
+                                value={workLink.url}
+                                onChange={handleWorkLinkChange}
+                                placeholder="Paste link here..."
+                                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-400"
+                            />
+                        </div>
+
+                        <div>
+                            <label className="mb-2 block text-sm font-bold text-slate-700">
+                                Link Notes
+                            </label>
+
+                            <textarea
+                                name="notes"
+                                value={workLink.notes}
+                                onChange={handleWorkLinkChange}
+                                placeholder="Optional notes about this link..."
+                                rows="4"
+                                className="w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm leading-7 outline-none transition focus:border-slate-400"
+                            />
+                        </div>
+                    </div>
                 </div>
 
                 <div className="mt-8 flex flex-col-reverse gap-3 border-t border-slate-100 pt-6 sm:flex-row sm:items-center sm:justify-end">

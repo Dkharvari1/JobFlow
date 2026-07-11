@@ -94,7 +94,7 @@ function JobDetails() {
                     filter: `id=eq.${id}`,
                 },
                 () => {
-                    loadJobDetails();
+                    loadJobDetails({ showLoading: false });
                 }
             )
             .on(
@@ -106,7 +106,7 @@ function JobDetails() {
                     filter: `job_id=eq.${id}`,
                 },
                 () => {
-                    loadJobDetails();
+                    loadJobDetails({ showLoading: false });
                 }
             )
             .on(
@@ -118,7 +118,7 @@ function JobDetails() {
                     filter: `job_id=eq.${id}`,
                 },
                 () => {
-                    loadJobDetails();
+                    loadJobDetails({ showLoading: false });
                 }
             )
             .on(
@@ -130,7 +130,7 @@ function JobDetails() {
                     filter: `job_id=eq.${id}`,
                 },
                 () => {
-                    loadJobDetails();
+                    loadJobDetails({ showLoading: false });
                 }
             )
             .subscribe();
@@ -140,9 +140,14 @@ function JobDetails() {
         };
     }, [workspaceId, id]);
 
-    const loadJobDetails = async () => {
+    const loadJobDetails = async (options = {}) => {
+    const showLoading = options?.showLoading !== false;
+
+    if (showLoading) {
         setLoading(true);
-        setErrorMessage("");
+    }
+
+    setErrorMessage("");
 
         const {
             data: { user },
@@ -544,7 +549,7 @@ function JobDetails() {
         setHandoffNote("");
         setSuccessMessage("Job passed to the selected team member.");
 
-        await loadJobDetails();
+        await loadJobDetails({ showLoading: false });
     };
 
     const handleLinkChange = (e) => {
@@ -905,7 +910,7 @@ function JobDetails() {
                 <div className="flex flex-wrap gap-3">
                     <button
                         type="button"
-                        onClick={loadJobDetails}
+                        onClick={() => loadJobDetails({ showLoading: false })}
                         className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700 transition hover:bg-slate-50"
                     >
                         <RefreshCcw size={17} />
