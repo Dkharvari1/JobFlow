@@ -979,7 +979,7 @@ function getNextBestAction({
             message: `${overdueJobs.length} job${overdueJobs.length === 1 ? " is" : "s are"
                 } overdue. Open the progress list and update the status or due date.`,
             buttonText: "Review Overdue Jobs",
-            link: "progress",
+            link: "jobs",
         };
     }
 
@@ -988,7 +988,7 @@ function getNextBestAction({
             message: `${highPriorityJobs.length} high-priority job${highPriorityJobs.length === 1 ? " needs" : "s need"
                 } attention. Check these before lower-priority work.`,
             buttonText: "View Priority Jobs",
-            link: "progress",
+            link: "jobs",
         };
     }
 
@@ -1006,7 +1006,7 @@ function getNextBestAction({
             message: `${dueSoonJobs.length} job${dueSoonJobs.length === 1 ? " is" : "s are"
                 } due soon. Review them before they become overdue.`,
             buttonText: "View Due Soon",
-            link: "progress",
+            link: "jobs",
         };
     }
 
@@ -1016,7 +1016,7 @@ function getNextBestAction({
                 } moved beyond ${defaultStatus?.name || "the first step"
                 }. Check the workflow and keep them moving.`,
             buttonText: "Open Workflow",
-            link: "progress",
+            link: "jobs",
         };
     }
 

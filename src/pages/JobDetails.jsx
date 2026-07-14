@@ -17,11 +17,13 @@ import {
     Trash2,
     UserRound,
     ExternalLink,
+    FileSpreadsheet,
     Globe,
     LinkIcon,
     Plus,
     X,
 } from "lucide-react";
+import * as XLSX from "xlsx";
 import { supabase } from "../lib/supabaseClient";
 
 const priorityOptions = ["Low", "Medium", "High", "Urgent"];
@@ -406,6 +408,8 @@ function JobDetails() {
         currentMember?.role === "admin" ||
         job?.assigned_member_id === currentMember?.id;
 
+    const canExportJob = currentMember?.role === "owner";
+
     const availablePassMembers = members.filter(
         (member) => member.id !== job?.assigned_member_id
     );
@@ -705,6 +709,101 @@ function JobDetails() {
         );
     };
 
+    const exportJobToExcel = () => {
+        if (!canExportJob) {
+            setErrorMessage("Only the workspace owner can export this job.");
+            return;
+        }
+
+        if (!job) return;
+
+        const workbook = XLSX.utils.book_new();
+
+        const jobDetailsRows = [
+            { Field: "Job Number", Value: job.job_number || "" },
+            { Field: "Title", Value: job.title || "" },
+            { Field: "Client", Value: job.client || "" },
+            { Field: "Client Contact", Value: job.client_contact || "" },
+            { Field: "Description", Value: job.description || "" },
+            { Field: "Status", Value: currentStatus?.name || job.status || "" },
+            { Field: "Job Type", Value: currentType?.name || job.type || "" },
+            {
+                Field: "Job Resource",
+                Value: currentResource?.name || job.job_resource || "",
+            },
+            { Field: "Priority", Value: job.priority || "" },
+            { Field: "Assigned To", Value: assignedName || "" },
+            { Field: "Due Date", Value: formatDate(job.due_date) },
+            { Field: "Created", Value: formatDateTime(job.created_at) },
+            { Field: "Last Updated", Value: formatDateTime(job.updated_at) },
+            {
+                Field: "Latest Update",
+                Value: job.last_activity_at
+                    ? `${getActivityLabel(job)} · ${formatDateTime(job.last_activity_at)}`
+                    : "No updates yet",
+            },
+        ];
+
+        const commentsRows =
+            comments.length > 0
+                ? comments.map((comment) => ({
+                    Name: comment.member_name || "Unknown User",
+                    Comment: comment.body || "",
+                    Created: formatDateTime(comment.created_at),
+                }))
+                : [{ Message: "No comments yet." }];
+
+        const linksRows =
+            jobLinks.length > 0
+                ? jobLinks.map((link) => {
+                    const preview = getStoredLinkPreview(link);
+
+                    return {
+                        Title: preview.title || "",
+                        Description: preview.description || "",
+                        Site: preview.site_name || preview.domain || "",
+                        URL: preview.url || link.url || "",
+                        Notes: link.notes || "",
+                        Created: formatDateTime(link.created_at),
+                    };
+                })
+                : [{ Message: "No work links yet." }];
+
+        const handoffRows =
+            handoffs.length > 0
+                ? handoffs.map((handoff) => ({
+                    From: handoff.from_member_name || "Someone",
+                    To: handoff.to_member_name || "Someone",
+                    Status: handoff.status_name_after || "",
+                    Note: handoff.note || "",
+                    Created: formatDateTime(handoff.created_at),
+                }))
+                : [{ Message: "No handoffs yet." }];
+
+        const historyRows =
+            jobHistory.length > 0
+                ? jobHistory.map((historyItem) => ({
+                    Type: formatActivityType(historyItem.activity_type),
+                    Summary: historyItem.summary || "",
+                    Details: historyItem.details || "",
+                    UpdatedBy: historyItem.member_name || "",
+                    Created: formatDateTime(historyItem.created_at),
+                }))
+                : [{ Message: "No update history yet." }];
+
+        addSheetToWorkbook(workbook, "Job Details", jobDetailsRows);
+        addSheetToWorkbook(workbook, "Comments", commentsRows);
+        addSheetToWorkbook(workbook, "Work Links", linksRows);
+        addSheetToWorkbook(workbook, "Handoffs", handoffRows);
+        addSheetToWorkbook(workbook, "Update History", historyRows);
+
+        const fileName = sanitizeExcelFileName(
+            `${job.job_number || "Job"}-${job.title || "Export"}`
+        );
+
+        XLSX.writeFile(workbook, `${fileName}.xlsx`);
+    };
+
     const handleChange = (e) => {
         const { name, value } = e.target;
 
@@ -942,6 +1041,17 @@ function JobDetails() {
                         <RefreshCcw size={17} />
                         Refresh
                     </button>
+
+                    {canExportJob && (
+                        <button
+                            type="button"
+                            onClick={exportJobToExcel}
+                            className="inline-flex items-center gap-2 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-black text-green-700 transition hover:bg-green-100"
+                        >
+                            <FileSpreadsheet size={17} />
+                            Export Excel
+                        </button>
+                    )}
 
                     {canPassJob && (
                         <button
@@ -2081,6 +2191,26 @@ function getActivityLabel(job) {
     };
 
     return typeLabels[job.last_activity_type] || "Job updated";
+}
+
+function addSheetToWorkbook(workbook, sheetName, rows) {
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+
+    worksheet["!cols"] = Object.keys(rows[0] || {}).map((key) => ({
+        wch: Math.max(
+            key.length + 2,
+            ...rows.map((row) => String(row[key] || "").length + 2)
+        ),
+    }));
+
+    XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+}
+
+function sanitizeExcelFileName(value) {
+    return String(value || "job-export")
+        .replace(/[\\/:*?"<>|]/g, "")
+        .replace(/\s+/g, "-")
+        .slice(0, 80);
 }
 
 function formatDate(value) {
