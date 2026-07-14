@@ -43,6 +43,7 @@ function JobDetails() {
     const [comments, setComments] = useState([]);
 
     const [jobLinks, setJobLinks] = useState([]);
+    const [jobHistory, setJobHistory] = useState([]);
     const [newLink, setNewLink] = useState({
         url: "",
         notes: "",
@@ -133,6 +134,18 @@ function JobDetails() {
                     loadJobDetails({ showLoading: false });
                 }
             )
+            .on(
+                "postgres_changes",
+                {
+                    event: "*",
+                    schema: "public",
+                    table: "job_activity_history",
+                    filter: `job_id=eq.${id}`,
+                },
+                () => {
+                    loadJobDetails({ showLoading: false });
+                }
+            )
             .subscribe();
 
         return () => {
@@ -171,6 +184,7 @@ function JobDetails() {
             handoffsResponse,
             commentsResponse,
             jobLinksResponse,
+            jobHistoryResponse,
         ] = await Promise.all([
             supabase
                 .from("jobs")
@@ -212,6 +226,12 @@ function JobDetails() {
                 .order("created_at", { ascending: true }),
             supabase
                 .from("job_links")
+                .select("*")
+                .eq("workspace_id", workspaceId)
+                .eq("job_id", id)
+                .order("created_at", { ascending: false }),
+            supabase
+                .from("job_activity_history")
                 .select("*")
                 .eq("workspace_id", workspaceId)
                 .eq("job_id", id)
@@ -262,6 +282,11 @@ function JobDetails() {
 
         if (jobLinksResponse.error) {
             setErrorMessage(jobLinksResponse.error.message);
+            setLoading(false);
+            return;
+        }
+        if (jobHistoryResponse.error) {
+            setErrorMessage(jobHistoryResponse.error.message);
             setLoading(false);
             return;
         }
@@ -320,6 +345,7 @@ function JobDetails() {
         setHandoffs(handoffsResponse.data || []);
         setComments(commentsResponse.data || []);
         setJobLinks(jobLinksResponse.data || []);
+        setJobHistory(jobHistoryResponse.data || []);
         setCurrentMember(currentMembership || null);
 
         setFormData({
@@ -1293,6 +1319,30 @@ function JobDetails() {
 
                         <div className="mt-8">
                             <SectionTitle
+                                title="Update History"
+                                text="Every major update made to this job is saved here."
+                            />
+
+                            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                                {jobHistory.length === 0 ? (
+                                    <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm font-semibold text-slate-400">
+                                        No history yet.
+                                    </div>
+                                ) : (
+                                    <div className="space-y-4">
+                                        {jobHistory.map((historyItem) => (
+                                            <JobHistoryCard
+                                                key={historyItem.id}
+                                                historyItem={historyItem}
+                                            />
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="mt-8">
+                            <SectionTitle
                                 title="Handoff History"
                                 text="See when this job was passed from one person to another."
                             />
@@ -1491,6 +1541,12 @@ function JobDetails() {
                                             value={comments.length}
                                         />
 
+                                            <InfoRow
+                                                icon={History}
+                                                label="Update History"
+                                                value={jobHistory.length}
+                                            />
+
                                         <InfoRow
                                             icon={History}
                                             label="Handoffs"
@@ -1643,6 +1699,45 @@ function JobDetails() {
                     </form>
                 </div>
             )}
+        </div>
+    );
+}
+
+function JobHistoryCard({ historyItem }) {
+    return (
+        <div className="rounded-2xl bg-white p-4 shadow-sm">
+            <div className="flex gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-950 text-white">
+                    <History size={17} />
+                </div>
+
+                <div className="min-w-0 flex-1">
+                    <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-start">
+                        <div>
+                            <p className="text-sm font-black text-slate-950">
+                                {historyItem.summary}
+                            </p>
+
+                            <p className="mt-1 text-xs font-bold text-slate-400">
+                                {formatDateTime(historyItem.created_at)}
+                                {historyItem.member_name
+                                    ? ` · ${historyItem.member_name}`
+                                    : ""}
+                            </p>
+                        </div>
+
+                        <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-black uppercase tracking-wide text-slate-500">
+                            {formatActivityType(historyItem.activity_type)}
+                        </span>
+                    </div>
+
+                    {historyItem.details && (
+                        <p className="mt-3 whitespace-pre-wrap rounded-2xl bg-slate-50 p-3 text-sm leading-6 text-slate-600">
+                            {historyItem.details}
+                        </p>
+                    )}
+                </div>
+            </div>
         </div>
     );
 }
@@ -1996,6 +2091,21 @@ function formatDate(value) {
         day: "numeric",
         year: "numeric",
     });
+}
+
+function formatActivityType(value) {
+    const labels = {
+        created: "Created",
+        edit: "Edit",
+        status: "Status",
+        comment: "Comment",
+        comment_deleted: "Comment Deleted",
+        link: "Link",
+        link_deleted: "Link Deleted",
+        handoff: "Handoff",
+    };
+
+    return labels[value] || "Update";
 }
 
 function formatDateTime(value) {
