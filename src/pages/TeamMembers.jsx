@@ -451,13 +451,19 @@ function TeamMembers() {
                                 const isCurrentUser =
                                     member.user_id === currentUser?.id;
                                 const isOwner = member.role === "owner";
+                                const isAdmin = member.role === "admin";
                                 const currentUserIsOwner =
                                     currentMember?.role === "owner";
                                 const currentUserIsAdmin =
                                     currentMember?.role === "admin";
 
                                 const canEditThisPermission =
-                                    canManageTeam && !isCurrentUser && !isOwner;
+                                    !isCurrentUser &&
+                                    !isOwner &&
+                                    (
+                                        currentUserIsOwner ||
+                                        (currentUserIsAdmin && !isAdmin)
+                                    );
 
                                 return (
                                     <div
@@ -535,7 +541,7 @@ function TeamMembers() {
                                                 Workspace Role
                                             </p>
 
-                                            {canManageTeam ? (
+                                            {canEditThisPermission ? (
                                                 <select
                                                     value={
                                                         member.custom_role_id || ""

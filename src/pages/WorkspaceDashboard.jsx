@@ -32,10 +32,59 @@ function WorkspaceDashboard() {
 
     useEffect(() => {
         loadDashboardData();
+
+        const dashboardChannel = supabase
+            .channel(`workspace-dashboard-${workspaceId}`)
+            .on(
+                "postgres_changes",
+                {
+                    event: "*",
+                    schema: "public",
+                    table: "jobs",
+                    filter: `workspace_id=eq.${workspaceId}`,
+                },
+                () => {
+                    loadDashboardData({ showLoading: false });
+                }
+            )
+            .on(
+                "postgres_changes",
+                {
+                    event: "*",
+                    schema: "public",
+                    table: "workspace_job_statuses",
+                    filter: `workspace_id=eq.${workspaceId}`,
+                },
+                () => {
+                    loadDashboardData({ showLoading: false });
+                }
+            )
+            .on(
+                "postgres_changes",
+                {
+                    event: "*",
+                    schema: "public",
+                    table: "workspace_members",
+                    filter: `workspace_id=eq.${workspaceId}`,
+                },
+                () => {
+                    loadDashboardData({ showLoading: false });
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(dashboardChannel);
+        };
     }, [workspaceId]);
 
-    const loadDashboardData = async () => {
-        setLoading(true);
+    const loadDashboardData = async (options = {}) => {
+        const showLoading = options?.showLoading !== false;
+
+        if (showLoading) {
+            setLoading(true);
+        }
+
         setErrorMessage("");
 
         const {
@@ -139,6 +188,15 @@ function WorkspaceDashboard() {
     const canManageWorkspace =
         currentMember?.role === "owner" || currentMember?.role === "admin";
 
+    const isOwnerOrAdmin =
+        currentMember?.role === "owner" || currentMember?.role === "admin";
+
+    const canManageJob = (job) => {
+        if (!job || !currentMember) return false;
+
+        return isOwnerOrAdmin || job.assigned_member_id === currentMember.id;
+    };
+
     const getProfile = (userId) => {
         return profiles.find((profile) => profile.id === userId);
     };
@@ -172,26 +230,60 @@ function WorkspaceDashboard() {
         };
     };
 
-    const completedStatus = statuses[statuses.length - 1] || null;
+    const pipelineStatuses = useMemo(() => {
+        if (statuses.length > 0) return statuses;
+
+        const savedStatusNames = [];
+
+        jobs.forEach((job) => {
+            const savedName = job.status || "No Status";
+
+            if (!savedStatusNames.includes(savedName)) {
+                savedStatusNames.push(savedName);
+            }
+        });
+
+        return savedStatusNames.map((name, index) => ({
+            id: name,
+            name,
+            position: index + 1,
+            is_default: index === 0,
+        }));
+    }, [statuses, jobs]);
+
+    const completedStatus = pipelineStatuses[pipelineStatuses.length - 1] || null;
 
     const isCompletedJob = (job) => {
         const status = getJobStatus(job);
 
         if (completedStatus && status.id === completedStatus.id) return true;
+        if (completedStatus && status.name === completedStatus.name) return true;
 
         return ["complete", "completed", "done", "finished"].some((word) =>
             status.name.toLowerCase().includes(word)
         );
     };
 
-    const statusIncludes = (job, words) => {
-        const statusName = getJobStatus(job).name.toLowerCase();
-        return words.some((word) => statusName.includes(word));
+    const getDefaultStatus = () => {
+        return (
+            pipelineStatuses.find((status) => status.is_default) ||
+            pipelineStatuses[0] ||
+            null
+        );
     };
 
     const updateJobStatus = async (jobId, newStatusId) => {
         setErrorMessage("");
         setSuccessMessage("");
+
+        const jobToUpdate = jobs.find((job) => job.id === jobId);
+
+        if (!canManageJob(jobToUpdate)) {
+            setErrorMessage(
+                "Only the assigned person, an admin, or the owner can update this job."
+            );
+            return;
+        }
 
         const selectedStatus = statuses.find((status) => status.id === newStatusId);
 
@@ -200,12 +292,18 @@ function WorkspaceDashboard() {
             return;
         }
 
+        const activityAt = new Date().toISOString();
+
         const { error } = await supabase
             .from("jobs")
             .update({
                 status_id: selectedStatus.id,
                 status: selectedStatus.name,
-                updated_at: new Date().toISOString(),
+                updated_at: activityAt,
+                last_activity_at: activityAt,
+                last_activity_type: "status",
+                last_activity_summary: `Status changed to ${selectedStatus.name}`,
+                last_activity_by_member_id: currentMember?.id || null,
             })
             .eq("id", jobId)
             .eq("workspace_id", workspaceId);
@@ -222,7 +320,11 @@ function WorkspaceDashboard() {
                         ...job,
                         status_id: selectedStatus.id,
                         status: selectedStatus.name,
-                        updated_at: new Date().toISOString(),
+                        updated_at: activityAt,
+                        last_activity_at: activityAt,
+                        last_activity_type: "status",
+                        last_activity_summary: `Status changed to ${selectedStatus.name}`,
+                        last_activity_by_member_id: currentMember?.id || null,
                     }
                     : job
             )
@@ -239,10 +341,19 @@ function WorkspaceDashboard() {
 
     const activeJobs = jobs.filter((job) => !isCompletedJob(job));
     const completedJobs = jobs.filter((job) => isCompletedJob(job));
-    const reviewJobs = jobs.filter((job) => statusIncludes(job, ["review"]));
-    const revisionJobs = jobs.filter((job) =>
-        statusIncludes(job, ["revision", "revisions"])
+    const defaultStatus = getDefaultStatus();
+
+    const highPriorityJobs = activeJobs.filter(
+        (job) => job.priority === "High" || job.priority === "Urgent"
     );
+
+    const jobsPastFirstStep = activeJobs.filter((job) => {
+        const status = getJobStatus(job);
+
+        if (!defaultStatus) return false;
+
+        return status.id !== defaultStatus.id && status.name !== defaultStatus.name;
+    });
 
     const overdueJobs = activeJobs.filter((job) => {
         if (!job.due_date) return false;
@@ -262,20 +373,22 @@ function WorkspaceDashboard() {
         ? activeJobs.filter((job) => job.assigned_member_id === currentMember.id)
         : [];
 
-    const highPriorityJobs = activeJobs.filter(
-        (job) => job.priority === "High" || job.priority === "Urgent"
-    );
-
     const recentJobs = jobs.slice(0, 6);
 
     const pipelineCounts = useMemo(() => {
-        return statuses.map((status) => ({
+        return pipelineStatuses.map((status) => ({
             status,
             label: status.name,
-            count: jobs.filter((job) => getJobStatus(job).id === status.id)
-                .length,
+            count: jobs.filter((job) => {
+                const jobStatus = getJobStatus(job);
+
+                return (
+                    jobStatus.id === status.id ||
+                    jobStatus.name.toLowerCase() === status.name.toLowerCase()
+                );
+            }).length,
         }));
-    }, [jobs, statuses]);
+    }, [jobs, pipelineStatuses]);
 
     const completionPercent =
         jobs.length === 0 ? 0 : Math.round((completedJobs.length / jobs.length) * 100);
@@ -284,16 +397,17 @@ function WorkspaceDashboard() {
         jobs,
         overdueJobs,
         dueSoonJobs,
-        reviewJobs,
-        revisionJobs,
+        highPriorityJobs,
+        jobsPastFirstStep,
         myJobs,
+        defaultStatus,
     });
 
     const attentionJobs = [
         ...overdueJobs,
         ...highPriorityJobs,
-        ...reviewJobs,
-        ...revisionJobs,
+        ...dueSoonJobs,
+        ...jobsPastFirstStep,
     ]
         .filter(
             (job, index, array) =>
@@ -444,12 +558,12 @@ function WorkspaceDashboard() {
                             description="Due within 7 days"
                         />
 
-                        <StatCard
-                            label="Needs Review"
-                            value={reviewJobs.length}
-                            icon={AlertCircle}
-                            description="Based on status name"
-                        />
+                            <StatCard
+                                label="High Priority"
+                                value={highPriorityJobs.length}
+                                icon={AlertCircle}
+                                description="High or urgent active jobs"
+                            />
 
                         <StatCard
                             label="Completed"
@@ -484,8 +598,7 @@ function WorkspaceDashboard() {
                             <div className="space-y-4">
                                 {pipelineCounts.length === 0 ? (
                                     <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm font-semibold text-slate-400">
-                                        Add statuses in Workspace Settings to
-                                        see pipeline progress.
+                                            Add statuses in Workspace Settings to see your custom workflow here.
                                     </div>
                                 ) : (
                                     pipelineCounts.map((item) => {
@@ -595,7 +708,9 @@ function WorkspaceDashboard() {
                                 getMemberName={getMemberName}
                                 getJobStatus={getJobStatus}
                                 statuses={statuses}
+                                pipelineStatuses={pipelineStatuses}
                                 updateJobStatus={updateJobStatus}
+                                canManageJob={canManageJob}
                             />
                         </DashboardPanel>
 
@@ -612,8 +727,10 @@ function WorkspaceDashboard() {
                                 getMemberName={getMemberName}
                                 getJobStatus={getJobStatus}
                                 statuses={statuses}
+                                pipelineStatuses={pipelineStatuses}
                                 updateJobStatus={updateJobStatus}
                                 highlightOverdue
+                                canManageJob={canManageJob}
                             />
                         </DashboardPanel>
 
@@ -630,7 +747,9 @@ function WorkspaceDashboard() {
                                 getMemberName={getMemberName}
                                 getJobStatus={getJobStatus}
                                 statuses={statuses}
+                                pipelineStatuses={pipelineStatuses}
                                 updateJobStatus={updateJobStatus}
+                                canManageJob={canManageJob}
                             />
                         </DashboardPanel>
                     </div>
@@ -713,7 +832,9 @@ function JobList({
     getMemberName,
     getJobStatus,
     statuses,
+    pipelineStatuses,
     updateJobStatus,
+    canManageJob,
     highlightOverdue = false,
 }) {
     if (jobs.length === 0) {
@@ -762,16 +883,17 @@ function JobList({
                                 </p>
                             </div>
 
-                            <StatusBadge status={status} statuses={statuses} />
+                            <StatusBadge status={status} statuses={pipelineStatuses} />
                         </div>
 
                         <div className="mt-3">
                             <select
                                 value={status.id}
+                                disabled={!canManageJob(job) || statuses.length === 0}
                                 onChange={(e) =>
                                     updateJobStatus(job.id, e.target.value)
                                 }
-                                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold outline-none transition focus:border-slate-400 focus:bg-white"
+                                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold outline-none transition focus:border-slate-400 focus:bg-white disabled:cursor-not-allowed disabled:opacity-60"
                             >
                                 <option value="" disabled>
                                     Missing status
@@ -786,6 +908,11 @@ function JobList({
                                     </option>
                                 ))}
                             </select>
+                            {!canManageJob(job) && (
+                                <p className="mt-2 text-xs font-semibold text-slate-400">
+                                    Only the assigned person, an admin, or the owner can update this job.
+                                </p>
+                            )}
                         </div>
                     </div>
                 );
@@ -842,9 +969,10 @@ function getNextBestAction({
     jobs,
     overdueJobs,
     dueSoonJobs,
-    reviewJobs,
-    revisionJobs,
+    highPriorityJobs,
+    jobsPastFirstStep,
     myJobs,
+    defaultStatus,
 }) {
     if (overdueJobs.length > 0) {
         return {
@@ -855,20 +983,11 @@ function getNextBestAction({
         };
     }
 
-    if (reviewJobs.length > 0) {
+    if (highPriorityJobs.length > 0) {
         return {
-            message: `${reviewJobs.length} job${reviewJobs.length === 1 ? " is" : "s are"
-                } waiting for review. Check them so work can keep moving.`,
-            buttonText: "Open Review Jobs",
-            link: "progress",
-        };
-    }
-
-    if (revisionJobs.length > 0) {
-        return {
-            message: `${revisionJobs.length} job${revisionJobs.length === 1 ? " needs" : "s need"
-                } revisions. These should be handled before new work piles up.`,
-            buttonText: "View Revisions",
+            message: `${highPriorityJobs.length} high-priority job${highPriorityJobs.length === 1 ? " needs" : "s need"
+                } attention. Check these before lower-priority work.`,
+            buttonText: "View Priority Jobs",
             link: "progress",
         };
     }
@@ -887,6 +1006,16 @@ function getNextBestAction({
             message: `${dueSoonJobs.length} job${dueSoonJobs.length === 1 ? " is" : "s are"
                 } due soon. Review them before they become overdue.`,
             buttonText: "View Due Soon",
+            link: "progress",
+        };
+    }
+
+    if (jobsPastFirstStep.length > 0) {
+        return {
+            message: `${jobsPastFirstStep.length} active job${jobsPastFirstStep.length === 1 ? " has" : "s have"
+                } moved beyond ${defaultStatus?.name || "the first step"
+                }. Check the workflow and keep them moving.`,
+            buttonText: "Open Workflow",
             link: "progress",
         };
     }

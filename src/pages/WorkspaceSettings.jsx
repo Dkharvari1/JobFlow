@@ -13,6 +13,7 @@ import {
     RotateCcw,
     Save,
     Settings,
+    ShieldCheck,
     Star,
     Trash2,
     X,
@@ -42,9 +43,15 @@ function WorkspaceSettings() {
     const [resources, setResources] = useState([]);
     const [jobTypes, setJobTypes] = useState([]);
 
+    const [workspaceRoles, setWorkspaceRoles] = useState([]);
+
     const [newStatusName, setNewStatusName] = useState("");
     const [newResourceName, setNewResourceName] = useState("");
     const [newTypeName, setNewTypeName] = useState("");
+
+    const [newRoleName, setNewRoleName] = useState("");
+    const [editingRoleId, setEditingRoleId] = useState("");
+    const [editingRoleName, setEditingRoleName] = useState("");
 
     const [editingItem, setEditingItem] = useState(null);
     const [editingName, setEditingName] = useState("");
@@ -115,8 +122,12 @@ function WorkspaceSettings() {
             return;
         }
 
-        const [statusesResponse, resourcesResponse, jobTypesResponse] =
-            await Promise.all([
+        const [
+            statusesResponse,
+            resourcesResponse,
+            jobTypesResponse,
+            workspaceRolesResponse,
+            ] = await Promise.all([
                 supabase
                     .from("workspace_job_statuses")
                     .select("*")
@@ -132,6 +143,11 @@ function WorkspaceSettings() {
                     .select("*")
                     .eq("workspace_id", workspaceId)
                     .order("position", { ascending: true }),
+                supabase
+                    .from("workspace_roles")
+                    .select("*")
+                    .eq("workspace_id", workspaceId)
+                    .order("name", { ascending: true }),
             ]);
 
         if (statusesResponse.error) {
@@ -152,12 +168,19 @@ function WorkspaceSettings() {
             return;
         }
 
+        if (workspaceRolesResponse.error) {
+            setErrorMessage(workspaceRolesResponse.error.message);
+            setLoading(false);
+            return;
+        }
+
         setWorkspace(workspaceData);
         setWorkspaceName(workspaceData.name || "");
         setWorkspaceDescription(workspaceData.description || "");
         setStatuses(statusesResponse.data || []);
         setResources(resourcesResponse.data || []);
         setJobTypes(jobTypesResponse.data || []);
+        setWorkspaceRoles(workspaceRolesResponse.data || []);
         setLoading(false);
     };
 
@@ -228,6 +251,94 @@ function WorkspaceSettings() {
 
         setShowDeleteModal(false);
         navigate("/workspaces");
+    };
+
+    const createWorkspaceRole = async () => {
+        const cleanName = newRoleName.trim();
+
+        if (!cleanName || !currentUser) return;
+
+        setErrorMessage("");
+        setSuccessMessage("");
+
+        const { error } = await supabase.from("workspace_roles").insert({
+            workspace_id: workspaceId,
+            name: cleanName,
+            created_by: currentUser.id,
+        });
+
+        if (error) {
+            setErrorMessage(error.message);
+            return;
+        }
+
+        setNewRoleName("");
+        setSuccessMessage("Workspace role created.");
+        await loadSettings();
+    };
+
+    const startEditingRole = (role) => {
+        setEditingRoleId(role.id);
+        setEditingRoleName(role.name);
+        setErrorMessage("");
+        setSuccessMessage("");
+    };
+
+    const cancelEditingRole = () => {
+        setEditingRoleId("");
+        setEditingRoleName("");
+    };
+
+    const saveEditingRole = async () => {
+        const cleanName = editingRoleName.trim();
+
+        if (!editingRoleId || !cleanName) return;
+
+        setErrorMessage("");
+        setSuccessMessage("");
+
+        const { error } = await supabase
+            .from("workspace_roles")
+            .update({
+                name: cleanName,
+            })
+            .eq("id", editingRoleId)
+            .eq("workspace_id", workspaceId);
+
+        if (error) {
+            setErrorMessage(error.message);
+            return;
+        }
+
+        setEditingRoleId("");
+        setEditingRoleName("");
+        setSuccessMessage("Workspace role updated.");
+        await loadSettings();
+    };
+
+    const deleteWorkspaceRole = async (role) => {
+        const confirmed = window.confirm(
+            `Are you sure you want to delete "${role.name}"? Team members using this role will lose that custom role label.`
+        );
+
+        if (!confirmed) return;
+
+        setErrorMessage("");
+        setSuccessMessage("");
+
+        const { error } = await supabase
+            .from("workspace_roles")
+            .delete()
+            .eq("id", role.id)
+            .eq("workspace_id", workspaceId);
+
+        if (error) {
+            setErrorMessage(error.message);
+            return;
+        }
+
+        setSuccessMessage("Workspace role deleted.");
+        await loadSettings();
     };
 
     const addItem = async ({ table, name, items, isStatus = false }) => {
@@ -642,6 +753,20 @@ function WorkspaceSettings() {
                 />
 
                 <div className="grid gap-6">
+                    <WorkspaceRolesSection
+                        roles={workspaceRoles}
+                        newRoleName={newRoleName}
+                        setNewRoleName={setNewRoleName}
+                        editingRoleId={editingRoleId}
+                        editingRoleName={editingRoleName}
+                        setEditingRoleName={setEditingRoleName}
+                        onAdd={createWorkspaceRole}
+                        onStartEdit={startEditingRole}
+                        onCancelEdit={cancelEditingRole}
+                        onSaveEdit={saveEditingRole}
+                        onDelete={deleteWorkspaceRole}
+                    />
+
                     <CustomizationSection
                         icon={Layers}
                         title="Job Resources"
@@ -1120,6 +1245,140 @@ function StatusWorkflowSection({
                         ))
                     )}
                 </div>
+            </div>
+        </section>
+    );
+}
+
+function WorkspaceRolesSection({
+    roles,
+    newRoleName,
+    setNewRoleName,
+    editingRoleId,
+    editingRoleName,
+    setEditingRoleName,
+    onAdd,
+    onStartEdit,
+    onCancelEdit,
+    onSaveEdit,
+    onDelete,
+}) {
+    return (
+        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="mb-5 flex items-start gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-slate-950 text-white">
+                    <ShieldCheck size={21} />
+                </div>
+
+                <div>
+                    <h2 className="text-xl font-black text-slate-950">
+                        Workspace Roles
+                    </h2>
+
+                    <p className="mt-1 text-sm leading-6 text-slate-500">
+                        Create custom role labels for your team, like Designer,
+                        Developer, Reviewer, Manager, or Editor.
+                    </p>
+                </div>
+            </div>
+
+            <div className="mb-5 rounded-2xl bg-slate-50 p-4 text-sm leading-6 text-slate-500">
+                These are team labels, not permissions. Permissions are still
+                Owner, Admin, and Member.
+            </div>
+
+            <div className="mb-5 flex gap-2">
+                <input
+                    value={newRoleName}
+                    onChange={(e) => setNewRoleName(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                            e.preventDefault();
+                            onAdd();
+                        }
+                    }}
+                    placeholder="Example: Designer"
+                    className="min-w-0 flex-1 rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-slate-400"
+                />
+
+                <button
+                    type="button"
+                    onClick={onAdd}
+                    className="inline-flex items-center justify-center rounded-2xl bg-slate-950 px-4 py-3 text-white transition hover:bg-slate-800"
+                >
+                    <Plus size={18} />
+                </button>
+            </div>
+
+            <div className="space-y-3">
+                {roles.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm font-semibold text-slate-400">
+                        No workspace roles yet. Add one above.
+                    </div>
+                ) : (
+                    roles.map((role) => {
+                        const isEditing = editingRoleId === role.id;
+
+                        return (
+                            <div
+                                key={role.id}
+                                className="rounded-2xl border border-slate-200 bg-slate-50 p-3"
+                            >
+                                {isEditing ? (
+                                    <div className="flex gap-2">
+                                        <input
+                                            value={editingRoleName}
+                                            onChange={(e) =>
+                                                setEditingRoleName(e.target.value)
+                                            }
+                                            className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold outline-none focus:border-slate-400"
+                                        />
+
+                                        <button
+                                            type="button"
+                                            onClick={onSaveEdit}
+                                            className="rounded-xl bg-slate-950 p-2 text-white"
+                                        >
+                                            <Check size={17} />
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            onClick={onCancelEdit}
+                                            className="rounded-xl border border-slate-200 bg-white p-2 text-slate-500"
+                                        >
+                                            <X size={17} />
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center justify-between gap-3">
+                                        <p className="min-w-0 truncate text-sm font-black text-slate-950">
+                                            {role.name}
+                                        </p>
+
+                                        <div className="flex shrink-0 items-center gap-1">
+                                            <button
+                                                type="button"
+                                                onClick={() => onStartEdit(role)}
+                                                className="rounded-lg p-2 text-slate-500 transition hover:bg-white hover:text-slate-950"
+                                            >
+                                                <Pencil size={15} />
+                                            </button>
+
+                                            <button
+                                                type="button"
+                                                onClick={() => onDelete(role)}
+                                                className="rounded-lg p-2 text-red-500 transition hover:bg-red-50"
+                                            >
+                                                <Trash2 size={15} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })
+                )}
             </div>
         </section>
     );
