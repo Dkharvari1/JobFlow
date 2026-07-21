@@ -18,6 +18,7 @@ import TeamMembers from "./pages/TeamMembers";
 import JobProgress from "./pages/JobProgress";
 import WorkspaceSettings from "./pages/WorkspaceSettings";
 import Messages from "./pages/Messages";
+import ClockInOut from "./pages/ClockInOut";
 
 import { mockJobs } from "./data/mockJobs";
 
@@ -83,6 +84,11 @@ function App() {
         <Route
           path="/workspaces/:workspaceId/jobs/:id"
           element={<JobDetails />}
+        />
+
+        <Route 
+          path="/workspaces/:workspaceId/time" 
+          element={<ClockInOut />}   
         />
       </Route>
     </Routes>

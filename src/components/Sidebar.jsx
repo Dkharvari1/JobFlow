@@ -3,6 +3,7 @@ import { NavLink, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
     BriefcaseBusiness,
     ClipboardList,
+    Clock3,
     LayoutDashboard,
     LogOut,
     Menu,
@@ -171,6 +172,13 @@ function Sidebar() {
                         to={`/workspaces/${workspaceId}/dashboard`}
                         icon={LayoutDashboard}
                         label="Dashboard"
+                        onClick={closeSidebar}
+                    />
+
+                    <SidebarLink
+                        to={`/workspaces/${workspaceId}/time`}
+                        icon={Clock3}
+                        label="Clock In / Out"
                         onClick={closeSidebar}
                     />
 
